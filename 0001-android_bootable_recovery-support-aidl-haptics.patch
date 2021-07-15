@@ -1,0 +1,119 @@
+From a2a6d3cd420021810b08596ca337f13683c27f9c Mon Sep 17 00:00:00 2001
+From: nebrassy <nebras30@gmail.com>
+Date: Fri, 16 Jul 2021 02:50:41 +0530
+Subject: [PATCH] android_bootable_recovery-support-aidl-haptics
+
+Co-authored-by: SebaUbuntu <barezzisebastiano@gmail.com>
+
+https: //gerrit.twrp.me/#/q/Ifaa0af4cb0fe0dee7d2a9ad4c58a5ede5ce46d59
+Change-Id: I18d6deb926532100360a7a42214eadc457524f1c
+---
+ minuitwrp/Android.bp               |  3 ++-
+ minuitwrp/events.cpp               | 12 ++++++++++++
+ minuitwrp/libminuitwrp_defaults.go |  9 +++++++++
+ prebuilt/Android.mk                |  4 ++++
+ 4 files changed, 27 insertions(+), 1 deletion(-)
+
+diff --git a/minuitwrp/Android.bp b/minuitwrp/Android.bp
+index 8005e02..20b0d68 100644
+--- a/minuitwrp/Android.bp
++++ b/minuitwrp/Android.bp
+@@ -53,7 +53,8 @@ cc_library_shared {
+         "libcutils",
+         "liblog",
+         "libbase",
+-        "libsync"
++        "libsync",
++        "libbinder_ndk"
+     ],
+     static_libs: ["libpixelflinger_twrp"]
+ }
+diff --git a/minuitwrp/events.cpp b/minuitwrp/events.cpp
+index 34c01e3..8abf055 100644
+--- a/minuitwrp/events.cpp
++++ b/minuitwrp/events.cpp
+@@ -32,6 +32,13 @@
+ #include <android/hardware/vibrator/1.2/IVibrator.h>
+ #endif
+ 
++#ifdef USE_QTI_AIDL_HAPTICS
++#include <aidl/android/hardware/vibrator/IVibrator.h>
++#include <android/binder_manager.h>
++using ::aidl::android::hardware::vibrator::IVibrator;
++static const std::string kVibratorInstance = std::string(IVibrator::descriptor) + "/default";
++#endif
++
+ #include "common.h"
+ 
+ #include "minuitwrp/minui.h"
+@@ -140,6 +147,11 @@ int vibrate(int timeout_ms)
+     if (vib != nullptr) {
+         vib->on((uint32_t)timeout_ms);
+     }
++#elif defined(USE_QTI_AIDL_HAPTICS)
++    std::shared_ptr<IVibrator> vib = IVibrator::fromBinder(ndk::SpAIBinder(AServiceManager_getService(kVibratorInstance.c_str())));
++    if (vib != nullptr) {
++        vib->on((uint32_t)timeout_ms, nullptr);
++    }
+ #else
+     if (std::ifstream(LEDS_HAPTICS_ACTIVATE_FILE).good()) {
+         write_to_file(LEDS_HAPTICS_DURATION_FILE, tout);
+diff --git a/minuitwrp/libminuitwrp_defaults.go b/minuitwrp/libminuitwrp_defaults.go
+index bcb2e88..92be0a0 100644
+--- a/minuitwrp/libminuitwrp_defaults.go
++++ b/minuitwrp/libminuitwrp_defaults.go
+@@ -15,6 +15,10 @@ func globalFlags(ctx android.BaseContext) []string {
+ 		cflags = append(cflags, "-DUSE_QTI_HAPTICS")
+ 	}
+ 
++	if getMakeVars(ctx, "TW_SUPPORT_INPUT_AIDL_HAPTICS") == "true" {
++		cflags = append(cflags, "-DUSE_QTI_AIDL_HAPTICS")
++	}
++
+ 	if getMakeVars(ctx, "TW_TARGET_USES_QCOM_BSP") == "true" {
+ 		cflags = append(cflags, "-DMSM_BSP")
+ 	}
+@@ -245,6 +249,11 @@ func globalSharedLibs(ctx android.BaseContext) []string {
+ 		sharedLibs = append(sharedLibs, "libhidlbase")
+ 	}
+ 
++	if getMakeVars(ctx, "TW_SUPPORT_INPUT_AIDL_HAPTICS") == "true" {
++		sharedLibs = append(sharedLibs, "android.hardware.vibrator-ndk_platform")
++		sharedLibs = append(sharedLibs, "android.hardware.vibrator-cpp")
++	}
++
+ 	if getMakeVars(ctx, "TW_INCLUDE_JPEG") != "" {
+ 		sharedLibs = append(sharedLibs, "libjpeg")
+ 	}
+diff --git a/prebuilt/Android.mk b/prebuilt/Android.mk
+index d3672b6..effa273 100755
+--- a/prebuilt/Android.mk
++++ b/prebuilt/Android.mk
+@@ -47,6 +47,7 @@ RECOVERY_BINARY_SOURCE_FILES += $(TARGET_OUT_EXECUTABLES)/resize2fs
+ #RELINK_SOURCE_FILES += $(TARGET_OUT_EXECUTABLES)/twrpmtp
+ RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_RECOVERY_ROOT_OUT)/system/lib64/android.hardware.fastboot@1.0.so
+ RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_RECOVERY_ROOT_OUT)/system/lib64/ld-android.so
++RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/libandroid_runtime_lazy.so
+ RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_RECOVERY_ROOT_OUT)/system/lib64/libc.so
+ RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_RECOVERY_ROOT_OUT)/system/lib64/libdl.so
+ RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_RECOVERY_ROOT_OUT)/system/lib64/libm.so
+@@ -70,6 +71,7 @@ RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/libinit.so
+ RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/bootstrap/libdl_android.so
+ RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/libprotobuf-cpp-lite.so
+ RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/libbinder.so
++RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/libbinder_ndk.so
+ RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/libchrome.so
+ RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/libevent.so
+ RECOVERY_BINARY_SOURCE_FILES += $(TARGET_OUT_EXECUTABLES)/keystore
+@@ -191,6 +193,8 @@ ifeq ($(TW_INCLUDE_CRYPTO), true)
+         RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/android.hardware.vibrator@1.0.so
+         RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/android.hardware.vibrator@1.1.so
+         RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/android.hardware.vibrator@1.2.so
++        RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/android.hardware.vibrator-V1-ndk_platform.so
++        RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/android.hardware.vibrator-V1-cpp.so
+         RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/libstatslog.so
+         RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/libsoft_attestation_cert.so
+         RECOVERY_LIBRARY_SOURCE_FILES += $(TARGET_OUT_SHARED_LIBRARIES)/libxml2.so
+-- 
+2.32.0
+
